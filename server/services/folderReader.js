@@ -19,13 +19,28 @@ class FolderReader {
         try {
           if (await fs.pathExists(drivePath)) {
             await fs.access(drivePath, fs.constants.R_OK);
+            
+            // Get drive type and free space info
+            let driveType = 'Local Drive';
+            try {
+              const stats = await fs.stat(drivePath);
+              // Try to determine if it's a removable drive or network drive
+              if (driveLetter === 'C') driveType = 'System Drive (C:)';
+              else if (['A', 'B'].includes(driveLetter)) driveType = 'Floppy Drive';
+              else driveType = `Local Drive (${driveLetter}:)`;
+            } catch (error) {
+              // Use default type
+            }
+            
             drives.push({
               name: `${driveLetter}: Drive`,
               path: drivePath,
               type: 'drive',
-              letter: driveLetter
+              letter: driveLetter,
+              driveType: driveType,
+              icon: driveLetter === 'C' ? '🖥️' : '💾'
             });
-            console.log(`✅ Found accessible drive: ${drivePath}`);
+            console.log(`✅ Found accessible drive: ${drivePath} (${driveType})`);
           }
         } catch (error) {
           // Skip drives we can't access
@@ -33,14 +48,21 @@ class FolderReader {
       }
     } else {
       // For Unix-like systems, add root and common mount points
-      const commonPaths = ['/', '/home', '/Users'];
-      for (const mountPath of commonPaths) {
+      const commonPaths = [
+        { path: '/', name: 'Root System', icon: '🖥️' },
+        { path: '/home', name: 'Home Directory', icon: '🏠' },
+        { path: '/Users', name: 'Users Directory', icon: '👥' },
+        { path: '/Volumes', name: 'Mounted Volumes', icon: '💾' }
+      ];
+      
+      for (const mountInfo of commonPaths) {
         try {
-          if (await fs.pathExists(mountPath)) {
+          if (await fs.pathExists(mountInfo.path)) {
             drives.push({
-              name: mountPath === '/' ? 'Root' : path.basename(mountPath),
-              path: mountPath,
-              type: 'drive'
+              name: mountInfo.name,
+              path: mountInfo.path,
+              type: 'drive',
+              icon: mountInfo.icon
             });
           }
         } catch (error) {
@@ -62,21 +84,44 @@ class FolderReader {
       const drives = await this.getAvailableDrives();
       folders.push(...drives);
       
-      // Then add common user directories
+      // Then add common user directories with comprehensive shortcuts
       try {
         const homeDir = os.homedir();
         console.log('🏠 Home directory:', homeDir);
         
         const userFolders = [
-          { name: '📄 Documents', path: path.join(homeDir, 'Documents'), type: 'folder', icon: '📄' },
-          { name: '🖥️ Desktop', path: path.join(homeDir, 'Desktop'), type: 'folder', icon: '🖥️' },
-          { name: '⬇️ Downloads', path: path.join(homeDir, 'Downloads'), type: 'folder', icon: '⬇️' }
+          { name: '🏠 Home Directory', path: homeDir, type: 'folder', icon: '🏠', priority: 1 },
+          { name: '📄 Documents', path: path.join(homeDir, 'Documents'), type: 'folder', icon: '📄', priority: 2 },
+          { name: '🖥️ Desktop', path: path.join(homeDir, 'Desktop'), type: 'folder', icon: '🖥️', priority: 3 },
+          { name: '⬇️ Downloads', path: path.join(homeDir, 'Downloads'), type: 'folder', icon: '⬇️', priority: 4 },
+          { name: '🖼️ Pictures', path: path.join(homeDir, 'Pictures'), type: 'folder', icon: '🖼️', priority: 5 },
+          { name: '🎵 Music', path: path.join(homeDir, 'Music'), type: 'folder', icon: '🎵', priority: 6 },
+          { name: '🎬 Videos', path: path.join(homeDir, 'Videos'), type: 'folder', icon: '🎬', priority: 7 }
         ];
+        
+        // Add Windows-specific shortcuts
+        if (process.platform === 'win32') {
+          userFolders.push(
+            { name: '📁 OneDrive', path: path.join(homeDir, 'OneDrive'), type: 'folder', icon: '☁️', priority: 8 },
+            { name: '📂 Public', path: 'C:\\Users\\Public', type: 'folder', icon: '👥', priority: 9 },
+            { name: '⚙️ AppData', path: path.join(homeDir, 'AppData'), type: 'folder', icon: '⚙️', priority: 10 }
+          );
+        }
+        
+        // Add macOS-specific shortcuts
+        if (process.platform === 'darwin') {
+          userFolders.push(
+            { name: '📱 Applications', path: '/Applications', type: 'folder', icon: '📱', priority: 8 },
+            { name: '☁️ iCloud Drive', path: path.join(homeDir, 'Library/Mobile Documents/com~apple~CloudDocs'), type: 'folder', icon: '☁️', priority: 9 }
+          );
+        }
         
         for (const folder of userFolders) {
           try {
             if (await fs.pathExists(folder.path)) {
-              console.log(`✅ Adding folder: ${folder.name} -> ${folder.path}`);
+              // Check if we can read the folder
+              await fs.access(folder.path, fs.constants.R_OK);
+              console.log(`✅ Adding accessible folder: ${folder.name} -> ${folder.path}`);
               folders.push(folder);
             } else {
               console.log(`❌ Folder does not exist: ${folder.path}`);
@@ -86,23 +131,29 @@ class FolderReader {
           }
         }
         
-        // Add some common Windows directories if they exist
-        if (process.platform === 'win32') {
-          const commonPaths = [
-            { name: '📁 Public Documents', path: 'C:\\Users\\Public\\Documents', type: 'folder', icon: '📁' }
-          ];
+        // Sort folders: drives first, then shortcuts by priority, then alphabetically
+        folders.sort((a, b) => {
+          // Drives first
+          if (a.type === 'drive' && b.type !== 'drive') return -1;
+          if (b.type === 'drive' && a.type !== 'drive') return 1;
           
-          for (const folder of commonPaths) {
-            try {
-              if (await fs.pathExists(folder.path) && !folders.find(f => f.path === folder.path)) {
-                console.log(`✅ Adding Windows folder: ${folder.name} -> ${folder.path}`);
-                folders.push(folder);
-              }
-            } catch (error) {
-              // Skip folders we can't access
-            }
+          // If both are drives, sort by drive letter
+          if (a.type === 'drive' && b.type === 'drive') {
+            return (a.letter || a.name).localeCompare(b.letter || b.name);
           }
-        }
+          
+          // If both have priority, sort by priority
+          if (a.priority && b.priority) {
+            return a.priority - b.priority;
+          }
+          
+          // If only one has priority, it goes first
+          if (a.priority && !b.priority) return -1;
+          if (b.priority && !a.priority) return 1;
+          
+          // Otherwise sort alphabetically
+          return a.name.localeCompare(b.name);
+        });
         
       } catch (error) {
         console.log('❌ Error accessing user directories:', error.message);
@@ -126,67 +177,108 @@ class FolderReader {
     };
   }
 
-  async getLocalPDFs(folderPath, maxFiles = 500) {
+  async getLocalPDFs(folderPath, maxFiles = 1000) {
     try {
-      console.log(`📁 Starting full recursive scan for PDFs: ${folderPath}`);
+      console.log(`📁 Starting comprehensive recursive scan for PDFs: ${folderPath}`);
       
       if (!await fs.pathExists(folderPath)) {
         throw new Error(`Folder not found: ${folderPath}`);
       }
 
+      // Check read permissions
+      try {
+        await fs.access(folderPath, fs.constants.R_OK);
+      } catch (error) {
+        throw new Error(`Access denied to folder: ${folderPath}`);
+      }
+
       // Use the recursive scanner for full folder scanning
-      const pdfFiles = await this.scanFolderRecursively(folderPath, 0, maxFiles);
-      console.log(`📄 Total PDFs found: ${pdfFiles.length}`);
+      const scanResult = await this.scanFolderRecursively(folderPath, 0, maxFiles);
+      console.log(`📄 Total PDFs found: ${scanResult.length} in ${folderPath}`);
 
-      const fileDetails = await Promise.all(
-        pdfFiles.map(async (filePath) => {
-          try {
-            const stats = await fs.stat(filePath);
-            return {
-              name: path.basename(filePath),
-              path: filePath,
-              size: stats.size,
-              modified: stats.mtime,
-              type: 'local',
-              relativePath: path.relative(folderPath, filePath)
-            };
-          } catch (error) {
-            console.error(`Error getting stats for ${filePath}:`, error);
-            return null;
-          }
-        })
-      );
+      // Get detailed file information with error handling
+      const fileDetails = [];
+      for (const filePath of scanResult) {
+        try {
+          const stats = await fs.stat(filePath);
+          const fileDetail = {
+            name: path.basename(filePath),
+            path: filePath,
+            size: stats.size,
+            modified: stats.mtime,
+            type: 'local',
+            relativePath: path.relative(folderPath, filePath),
+            folder: path.dirname(path.relative(folderPath, filePath)) || '.',
+            sizeFormatted: this.formatFileSize(stats.size)
+          };
+          fileDetails.push(fileDetail);
+        } catch (error) {
+          console.error(`Error getting stats for ${filePath}:`, error.message);
+        }
+      }
 
-      const validFiles = fileDetails.filter(file => file !== null);
-      console.log(`✅ Returning ${validFiles.length} valid PDF files`);
-      return validFiles;
+      // Sort by folder, then by name
+      fileDetails.sort((a, b) => {
+        if (a.folder !== b.folder) {
+          return a.folder.localeCompare(b.folder);
+        }
+        return a.name.localeCompare(b.name);
+      });
+
+      console.log(`✅ Returning ${fileDetails.length} valid PDF files from scan`);
+      return fileDetails;
     } catch (error) {
       console.error('❌ Error reading local folder:', error);
       throw error;
     }
   }
 
-  async scanFolderRecursively(folderPath, depth = 0, maxFiles = 500) {
+  formatFileSize(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  }
+
+  async scanFolderRecursively(folderPath, depth = 0, maxFiles = 1000) {
     const files = [];
-    const maxDepth = 10; // Allow deeper scanning for comprehensive search
-    const skipDirs = ['node_modules', '.git', '.vscode', 'dist', 'build', '.next', '__pycache__', 
-                     'temp', 'tmp', 'cache', 'logs', 'log', 'backup', 'backups', 'System Volume Information',
-                     'Windows', 'Program Files', 'Program Files (x86)', '$Recycle.Bin', 'Recovery'];
+    const maxDepth = 15; // Allow deeper scanning for comprehensive search
+    const skipDirs = [
+      // Development folders
+      'node_modules', '.git', '.vscode', '.vs', 'dist', 'build', '.next', '__pycache__', 
+      'target', 'bin', 'obj', '.gradle', '.idea',
+      // System folders
+      'temp', 'tmp', 'cache', 'logs', 'log', 'backup', 'backups', 
+      'System Volume Information', 'Windows', '$Recycle.Bin', 'Recovery',
+      // Program folders (but allow user to access if they really want)
+      // 'Program Files', 'Program Files (x86)' - removed to allow access
+    ];
     
     // Prevent infinite recursion
     if (depth > maxDepth) {
-      console.log(`Skipping deep directory: ${folderPath} (depth: ${depth})`);
+      console.log(`⚠️ Maximum depth reached: ${folderPath} (depth: ${depth})`);
       return files;
     }
     
     try {
+      // Check folder accessibility
+      try {
+        await fs.access(folderPath, fs.constants.R_OK);
+      } catch (accessError) {
+        console.log(`⚠️ Access denied to folder: ${folderPath}`);
+        return files;
+      }
+
       const items = await fs.readdir(folderPath);
-      console.log(`📂 Scanning folder: ${folderPath} (depth: ${depth}, ${items.length} items)`);
+      if (depth <= 2) { // Only log for shallow depths to avoid spam
+        console.log(`📂 Scanning: ${folderPath} (depth: ${depth}, ${items.length} items)`);
+      }
       
       // Process files first (PDFs in current directory)
       for (const item of items) {
-        // Skip hidden files and system files
-        if (item.startsWith('.') || item.startsWith('$')) {
+        // Skip hidden files, system files, and temp files
+        if (item.startsWith('.') || item.startsWith('$') || item.startsWith('~')) {
           continue;
         }
         
@@ -195,14 +287,19 @@ class FolderReader {
         try {
           const stats = await fs.stat(itemPath);
           
-          if (stats.isFile() && path.extname(item).toLowerCase() === '.pdf') {
-            files.push(itemPath);
-            console.log(`📄 Found PDF (${files.length}/${maxFiles}): ${item}`);
-            
-            // Stop if we've reached the maximum number of files
-            if (files.length >= maxFiles) {
-              console.log(`📄 Reached maximum files limit (${maxFiles}), stopping scan`);
-              return files;
+          if (stats.isFile()) {
+            const ext = path.extname(item).toLowerCase();
+            if (ext === '.pdf') {
+              files.push(itemPath);
+              if (files.length % 50 === 0 || files.length <= 10) {
+                console.log(`📄 Found PDF #${files.length}: ${path.basename(item)} in ${path.basename(folderPath)}`);
+              }
+              
+              // Stop if we've reached the maximum number of files
+              if (files.length >= maxFiles) {
+                console.log(`📄 Reached maximum files limit (${maxFiles}), stopping scan`);
+                return files;
+              }
             }
           }
         } catch (statError) {
@@ -214,7 +311,9 @@ class FolderReader {
       // Then process subdirectories if we haven't reached the file limit
       if (files.length < maxFiles && depth < maxDepth) {
         for (const item of items) {
-          if (item.startsWith('.') || item.startsWith('$') || skipDirs.includes(item.toLowerCase())) {
+          // Skip hidden, system, and known problematic directories
+          if (item.startsWith('.') || item.startsWith('$') || 
+              skipDirs.some(skip => item.toLowerCase().includes(skip.toLowerCase()))) {
             continue;
           }
           
@@ -240,7 +339,7 @@ class FolderReader {
         }
       }
     } catch (error) {
-      console.error(`Error scanning folder ${folderPath}:`, error.message);
+      console.error(`❌ Error scanning folder ${folderPath}: ${error.message}`);
     }
     
     return files;

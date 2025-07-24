@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run install:all` - Install dependencies for both server and client
 - `npm install` - Install server dependencies only
 - `cd client && npm install` - Install client dependencies only
+- `npm run check-keys` - Verify AI API key configuration
 
 ### Development
 - `npm run dev` - Start both frontend (port 3000) and backend (port 3001) in development mode
@@ -87,6 +88,34 @@ This is a monorepo containing both backend (Node.js/Express) and frontend (React
 - Supports folder browsing and file download
 - Requires client ID, secret, and access token
 - Gracefully handles missing configuration
+
+## AI API Configuration
+
+**IMPORTANT**: The system requires valid AI API keys to extract data from PDFs. Without these keys, you'll get authentication errors.
+
+### Required Setup:
+1. **Get an API key** from either:
+   - Anthropic (recommended): https://console.anthropic.com/
+   - OpenAI (alternative): https://platform.openai.com/api-keys
+
+2. **Add it to your .env file**:
+   ```bash
+   ANTHROPIC_API_KEY=sk-ant-your-key-here
+   # OR
+   OPENAI_API_KEY=sk-your-key-here
+   ```
+
+3. **Verify configuration**:
+   ```bash
+   npm run check-keys
+   ```
+
+4. **Restart the server** after adding keys
+
+### Troubleshooting:
+- If you see "401 authentication_error", your API key is invalid
+- Use `npm run check-keys` to verify your configuration
+- See `API_KEY_SETUP.md` for detailed instructions
 
 ## Important Implementation Details
 

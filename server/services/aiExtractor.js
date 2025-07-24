@@ -7,24 +7,45 @@ dotenv.config();
 
 class AIExtractor {
   constructor() {
-    this.openai = process.env.OPENAI_API_KEY ? new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY
+    // Check for valid API keys (not placeholders)
+    const anthropicKey = process.env.ANTHROPIC_API_KEY;
+    const openaiKey = process.env.OPENAI_API_KEY;
+    
+    const isValidAnthropicKey = anthropicKey && anthropicKey.startsWith('sk-ant-') && !anthropicKey.includes('placeholder');
+    const isValidOpenaiKey = openaiKey && openaiKey.startsWith('sk-') && !openaiKey.includes('placeholder');
+    
+    this.openai = isValidOpenaiKey ? new OpenAI({
+      apiKey: openaiKey
     }) : null;
     
-    this.anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY
+    this.anthropic = isValidAnthropicKey ? new Anthropic({
+      apiKey: anthropicKey
     }) : null;
 
     this.isConfigured = !!(this.openai || this.anthropic);
     
     if (!this.isConfigured) {
-      console.warn('⚠️  Warning: No AI API keys configured. Add OPENAI_API_KEY or ANTHROPIC_API_KEY to .env file for extraction functionality.');
+      console.error('❌ ERROR: No valid AI API keys configured!');
+      console.log('📋 To fix this:');
+      console.log('1. Get an Anthropic API key from: https://console.anthropic.com/');
+      console.log('2. Or get an OpenAI API key from: https://platform.openai.com/api-keys');
+      console.log('3. Add it to your .env file (remove any placeholder values)');
+      console.log('4. Restart the server');
+    } else {
+      const activeService = this.anthropic ? 'Anthropic Claude' : 'OpenAI GPT-4';
+      console.log(`✅ AI extraction ready with ${activeService}`);
     }
   }
 
   async extractDataFromText(text, fields, fileName, documentType = 'general') {
     if (!this.isConfigured) {
-      throw new Error('AI extraction not available - no API keys configured. Please add OPENAI_API_KEY or ANTHROPIC_API_KEY to your .env file.');
+      const errorMsg = 'AI extraction not available - no valid API keys configured.\n\n' +
+        'To fix this:\n' +
+        '1. Get an Anthropic API key from: https://console.anthropic.com/\n' +
+        '2. Or get an OpenAI API key from: https://platform.openai.com/api-keys\n' +
+        '3. Add it to your .env file (replace any placeholder values)\n' +
+        '4. Restart the server';
+      throw new Error(errorMsg);
     }
     
     const fieldsString = fields.map(field => `- ${field.name}: ${field.description || 'Extract relevant value'}`).join('\n');
@@ -152,6 +173,19 @@ Return only a JSON object with the field names as keys and extracted values as v
     } catch (error) {
       console.error('AI extraction error:', error);
       
+      // Provide specific error messages for common authentication issues
+      let errorMessage = error.message;
+      if (error.message.includes('authentication_error') || error.message.includes('invalid x-api-key')) {
+        errorMessage = 'Invalid API key. Please check your ANTHROPIC_API_KEY in the .env file.\n\n' +
+          'To fix:\n' +
+          '1. Visit https://console.anthropic.com/\n' +
+          '2. Generate a new API key\n' +
+          '3. Update ANTHROPIC_API_KEY in your .env file\n' +
+          '4. Restart the server';
+      } else if (error.message.includes('401')) {
+        errorMessage = 'API authentication failed. Please verify your API keys in the .env file and restart the server.';
+      }
+      
       // Return default structure with N/A values
       const defaultData = {};
       fields.forEach(field => {
@@ -160,7 +194,7 @@ Return only a JSON object with the field names as keys and extracted values as v
       
       return {
         success: false,
-        error: error.message,
+        error: errorMessage,
         data: defaultData,
         fileName: fileName
       };

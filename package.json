@@ -13,7 +13,8 @@
     "install:all": "npm install && cd client && npm install",
     "test": "jest",
     "lint": "eslint server/ --ext .js",
-    "typecheck": "echo 'No TypeScript files to check'"
+    "typecheck": "echo 'No TypeScript files to check'",
+    "check-keys": "node check_api_keys.js"
   },
   "dependencies": {
     "express": "^4.18.2",

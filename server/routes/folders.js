@@ -53,7 +53,11 @@ router.post('/local/pdfs', async (req, res) => {
       stack: error.stack,
       folderPath: req.body.folderPath
     });
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      error: error.message,
+      success: false,
+      details: `Failed to scan folder: ${req.body.folderPath}`
+    });
   }
 });
 

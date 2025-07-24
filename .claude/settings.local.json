@@ -28,7 +28,8 @@
       "Bash(tasklist)",
       "Bash(/dev/null)",
       "Bash(git add:*)",
-      "Bash(del nul)"
+      "Bash(del nul)",
+      "Bash(git fetch:*)"
     ],
     "deny": []
   }
