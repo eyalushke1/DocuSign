@@ -1,5 +1,7 @@
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import OCRService from './ocrService.js';
 import dotenv from 'dotenv';
 import CoFFieldValidator from '../utils/cofFieldValidator.js';
 
@@ -10,9 +12,11 @@ class AIExtractor {
     // Check for valid API keys (not placeholders)
     const anthropicKey = process.env.ANTHROPIC_API_KEY;
     const openaiKey = process.env.OPENAI_API_KEY;
+    const googleKey = process.env.GOOGLE_GEMINI_API_KEY;
     
     const isValidAnthropicKey = anthropicKey && anthropicKey.startsWith('sk-ant-') && !anthropicKey.includes('placeholder');
     const isValidOpenaiKey = openaiKey && openaiKey.startsWith('sk-') && !openaiKey.includes('placeholder');
+    const isValidGoogleKey = googleKey && googleKey.length > 10 && !googleKey.includes('placeholder');
     
     this.openai = isValidOpenaiKey ? new OpenAI({
       apiKey: openaiKey
@@ -22,29 +26,46 @@ class AIExtractor {
       apiKey: anthropicKey
     }) : null;
 
-    this.isConfigured = !!(this.openai || this.anthropic);
+    this.google = isValidGoogleKey ? new GoogleGenerativeAI(googleKey) : null;
+    
+    // Initialize OCR service as fallback
+    this.ocrService = new OCRService();
+
+    this.isConfigured = !!(this.openai || this.anthropic || this.google);
     
     if (!this.isConfigured) {
       console.error('❌ ERROR: No valid AI API keys configured!');
       console.log('📋 To fix this:');
       console.log('1. Get an Anthropic API key from: https://console.anthropic.com/');
       console.log('2. Or get an OpenAI API key from: https://platform.openai.com/api-keys');
-      console.log('3. Add it to your .env file (remove any placeholder values)');
-      console.log('4. Restart the server');
+      console.log('3. Or get a Google Gemini API key from: https://makersuite.google.com/app/apikey');
+      console.log('4. Add it to your .env file (remove any placeholder values)');
+      console.log('5. Restart the server');
+      console.log('📋 Note: OCR fallback is available even without API keys');
     } else {
-      const activeService = this.anthropic ? 'Anthropic Claude' : 'OpenAI GPT-4';
-      console.log(`✅ AI extraction ready with ${activeService}`);
+      const activeServices = [];
+      if (this.anthropic) activeServices.push('Anthropic Claude');
+      if (this.openai) activeServices.push('OpenAI GPT-4');
+      if (this.google) activeServices.push('Google Gemini');
+      console.log(`✅ AI extraction ready with ${activeServices.join(', ')} + OCR fallback`);
     }
   }
 
-  async extractDataFromText(text, fields, fileName, documentType = 'general') {
-    if (!this.isConfigured) {
-      const errorMsg = 'AI extraction not available - no valid API keys configured.\n\n' +
+  async extractDataFromText(text, fields, fileName, documentType = 'general', pdfPath = null) {
+    console.log(`🤖 Starting AI extraction for ${fileName} (${documentType})`);
+    
+    // If no API keys are configured, try OCR directly
+    if (!this.isConfigured && pdfPath) {
+      console.log('🔍 No AI API keys configured, attempting OCR extraction...');
+      return await this.extractWithOCR(pdfPath, fields, fileName, documentType);
+    } else if (!this.isConfigured) {
+      const errorMsg = 'AI extraction not available - no valid API keys configured and no PDF path for OCR.\n\n' +
         'To fix this:\n' +
         '1. Get an Anthropic API key from: https://console.anthropic.com/\n' +
         '2. Or get an OpenAI API key from: https://platform.openai.com/api-keys\n' +
-        '3. Add it to your .env file (replace any placeholder values)\n' +
-        '4. Restart the server';
+        '3. Or get a Google Gemini API key from: https://makersuite.google.com/app/apikey\n' +
+        '4. Add it to your .env file (replace any placeholder values)\n' +
+        '5. Restart the server';
       throw new Error(errorMsg);
     }
     
@@ -111,11 +132,44 @@ ${text}
 
 Return only a JSON object with the field names as keys and extracted values as values.`;
 
+    // Try each AI service in priority order: Claude -> OpenAI -> Google Gemini -> OCR
+    const aiMethods = [
+      { name: 'Claude (Anthropic)', service: 'anthropic' },
+      { name: 'OpenAI GPT-4', service: 'openai' },
+      { name: 'Google Gemini', service: 'google' }
+    ];
+
+    for (const method of aiMethods) {
+      if (!this[method.service]) continue;
+      
+      try {
+        console.log(`🤖 Attempting extraction with ${method.name}...`);
+        let result = await this.callAIService(method.service, prompt);
+        
+        if (result) {
+          return await this.processAIResult(result, fields, fileName, documentType, method.name);
+        }
+      } catch (error) {
+        console.warn(`⚠️ ${method.name} failed: ${error.message}`);
+        continue; // Try next AI service
+      }
+    }
+
+    // If all AI services failed, try OCR as final fallback
+    if (pdfPath) {
+      console.log('🔍 All AI services failed, attempting OCR extraction as final fallback...');
+      return await this.extractWithOCR(pdfPath, fields, fileName, documentType);
+    }
+
+    // If we get here, everything failed
+    throw new Error('All AI extraction methods failed and no PDF path available for OCR fallback');
+  }
+
+  async callAIService(service, prompt) {
     try {
       let result;
-      
-      if (this.anthropic) {
-        // Use Claude (Anthropic) - generally better for document analysis
+
+      if (service === 'anthropic' && this.anthropic) {
         const response = await this.anthropic.messages.create({
           model: 'claude-3-5-sonnet-20241022',
           max_tokens: 4000,
@@ -126,8 +180,7 @@ Return only a JSON object with the field names as keys and extracted values as v
           }]
         });
         result = response.content[0].text;
-      } else if (this.openai) {
-        // Fallback to OpenAI GPT-4
+      } else if (service === 'openai' && this.openai) {
         const response = await this.openai.chat.completions.create({
           model: 'gpt-4-turbo-preview',
           messages: [{
@@ -141,9 +194,22 @@ Return only a JSON object with the field names as keys and extracted values as v
           max_tokens: 4000
         });
         result = response.choices[0].message.content;
+      } else if (service === 'google' && this.google) {
+        const model = this.google.getGenerativeModel({ model: "gemini-1.5-pro" });
+        const response = await model.generateContent(prompt);
+        result = response.response.text();
       }
 
-      // Parse JSON response
+      return result;
+    } catch (error) {
+      console.error(`Error calling ${service}:`, error.message);
+      throw error;
+    }
+  }
+
+  async processAIResult(result, fields, fileName, documentType, aiServiceName) {
+    try {
+
       const jsonMatch = result.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const extractedData = JSON.parse(jsonMatch[0]);
@@ -155,36 +221,57 @@ Return only a JSON object with the field names as keys and extracted values as v
           
           // Apply CoF-specific validation if document type is CoF
           if (documentType === 'CoF') {
-            value = CoFFieldValidator.validateField(field.name, value, text);
+            value = CoFFieldValidator.validateField(field.name, value, result);
           }
           
           processedData[field.name] = value;
         });
         
+        console.log(`✅ Successfully extracted data using ${aiServiceName}`);
         return {
           success: true,
           data: processedData,
-          fileName: fileName
+          fileName: fileName,
+          method: aiServiceName
         };
       } else {
-        throw new Error('No valid JSON found in AI response');
+        throw new Error(`No valid JSON found in ${aiServiceName} response`);
       }
       
     } catch (error) {
-      console.error('AI extraction error:', error);
+      console.error(`${aiServiceName} processing error:`, error);
+      throw error;
+    }
+  }
+
+  async extractWithOCR(pdfPath, fields, fileName, documentType) {
+    try {
+      console.log(`🔍 Starting OCR extraction for ${fileName}...`);
       
-      // Provide specific error messages for common authentication issues
-      let errorMessage = error.message;
-      if (error.message.includes('authentication_error') || error.message.includes('invalid x-api-key')) {
-        errorMessage = 'Invalid API key. Please check your ANTHROPIC_API_KEY in the .env file.\n\n' +
-          'To fix:\n' +
-          '1. Visit https://console.anthropic.com/\n' +
-          '2. Generate a new API key\n' +
-          '3. Update ANTHROPIC_API_KEY in your .env file\n' +
-          '4. Restart the server';
-      } else if (error.message.includes('401')) {
-        errorMessage = 'API authentication failed. Please verify your API keys in the .env file and restart the server.';
+      const ocrResult = await this.ocrService.extractTextFromPDF(pdfPath);
+      
+      if (!ocrResult.success || !ocrResult.text) {
+        throw new Error(ocrResult.error || 'OCR failed to extract text');
       }
+
+      console.log(`✅ OCR extracted ${ocrResult.text.length} characters from ${ocrResult.pagesProcessed} pages`);
+
+      // Use simple pattern matching for OCR results since we don't have AI
+      const extractedData = {};
+      fields.forEach(field => {
+        extractedData[field.name] = this.extractFieldWithPatterns(field, ocrResult.text);
+      });
+
+      return {
+        success: true,
+        data: extractedData,
+        fileName: fileName,
+        method: 'OCR',
+        pagesProcessed: ocrResult.pagesProcessed
+      };
+
+    } catch (error) {
+      console.error('❌ OCR extraction failed:', error);
       
       // Return default structure with N/A values
       const defaultData = {};
@@ -194,11 +281,93 @@ Return only a JSON object with the field names as keys and extracted values as v
       
       return {
         success: false,
-        error: errorMessage,
+        error: `OCR extraction failed: ${error.message}`,
         data: defaultData,
-        fileName: fileName
+        fileName: fileName,
+        method: 'OCR'
       };
     }
+  }
+
+  extractFieldWithPatterns(field, text) {
+    const fieldName = field.name.toLowerCase();
+    const description = (field.description || '').toLowerCase();
+    
+    // Common patterns for different field types
+    const patterns = {
+      date: /(\d{4}[-\/]\d{1,2}[-\/]\d{1,2}|\d{1,2}[-\/]\d{1,2}[-\/]\d{4})/g,
+      amount: /[\$€£]?\s*\d{1,3}(?:,\d{3})*(?:\.\d{2})?/g,
+      email: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
+      phone: /(?:\+\d{1,3}\s?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g,
+      invoice: /inv[oice]*\s*#?\s*(\w+)/gi,
+      number: /\d+/g
+    };
+
+    // Try to match field-specific patterns
+    if (fieldName.includes('date') || description.includes('date')) {
+      const matches = text.match(patterns.date);
+      return matches ? matches[0] : 'N/A';
+    }
+    
+    if (fieldName.includes('amount') || fieldName.includes('total') || description.includes('amount') || description.includes('total')) {
+      const matches = text.match(patterns.amount);
+      return matches ? matches[0] : 'N/A';
+    }
+    
+    if (fieldName.includes('email') || description.includes('email')) {
+      const matches = text.match(patterns.email);
+      return matches ? matches[0] : 'N/A';
+    }
+    
+    if (fieldName.includes('phone') || description.includes('phone')) {
+      const matches = text.match(patterns.phone);
+      return matches ? matches[0] : 'N/A';
+    }
+    
+    if (fieldName.includes('invoice') || description.includes('invoice')) {
+      const matches = text.match(patterns.invoice);
+      return matches ? matches[1] : 'N/A';
+    }
+
+    // For other fields, try to find text near the field name
+    const fieldRegex = new RegExp(`${fieldName}[:\\s]*([^\\n\\r]{1,100})`, 'gi');
+    const match = text.match(fieldRegex);
+    if (match) {
+      return match[0].replace(new RegExp(fieldName, 'gi'), '').replace(/[:]\s*/, '').trim();
+    }
+
+    return 'N/A';
+  }
+
+  // Handle errors and return default structure
+  handleExtractionError(error, fields, fileName) {
+    console.error('Extraction error:', error);
+    
+    // Provide specific error messages for common authentication issues
+    let errorMessage = error.message;
+    if (error.message.includes('authentication_error') || error.message.includes('invalid x-api-key')) {
+      errorMessage = 'Invalid API key. Please check your API keys in the .env file.\n\n' +
+        'To fix:\n' +
+        '1. Visit https://console.anthropic.com/ or https://platform.openai.com/api-keys or https://makersuite.google.com/app/apikey\n' +
+        '2. Generate a new API key\n' +
+        '3. Update the appropriate API key in your .env file\n' +
+        '4. Restart the server';
+    } else if (error.message.includes('401')) {
+      errorMessage = 'API authentication failed. Please verify your API keys in the .env file and restart the server.';
+    }
+    
+    // Return default structure with N/A values
+    const defaultData = {};
+    fields.forEach(field => {
+      defaultData[field.name] = 'N/A';
+    });
+    
+    return {
+      success: false,
+      error: errorMessage,
+      data: defaultData,
+      fileName: fileName
+    };
   }
 
   async batchExtract(documents, fields, documentType = 'general') {
@@ -206,25 +375,20 @@ Return only a JSON object with the field names as keys and extracted values as v
     
     for (const doc of documents) {
       try {
-        const result = await this.extractDataFromText(doc.text, fields, doc.fileName, documentType);
+        const result = await this.extractDataFromText(
+          doc.text, 
+          fields, 
+          doc.fileName, 
+          documentType, 
+          doc.pdfPath // Pass PDF path for OCR fallback
+        );
         results.push(result);
         
         // Small delay to respect API rate limits
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 200));
       } catch (error) {
         console.error(`Error processing ${doc.fileName}:`, error);
-        
-        const defaultData = {};
-        fields.forEach(field => {
-          defaultData[field.name] = 'N/A';
-        });
-        
-        results.push({
-          success: false,
-          error: error.message,
-          data: defaultData,
-          fileName: doc.fileName
-        });
+        results.push(this.handleExtractionError(error, fields, doc.fileName));
       }
     }
     
@@ -238,7 +402,8 @@ Return only a JSON object with the field names as keys and extracted values as v
       models.push({
         provider: 'Anthropic',
         model: 'claude-3-5-sonnet-20241022',
-        description: 'Best for document analysis and structured data extraction'
+        description: 'Best for document analysis and structured data extraction',
+        priority: 1
       });
     }
     
@@ -246,9 +411,27 @@ Return only a JSON object with the field names as keys and extracted values as v
       models.push({
         provider: 'OpenAI',
         model: 'gpt-4-turbo-preview',
-        description: 'Versatile language model for data extraction'
+        description: 'Versatile language model for data extraction',
+        priority: 2
       });
     }
+    
+    if (this.google) {
+      models.push({
+        provider: 'Google',
+        model: 'gemini-1.5-pro',
+        description: 'Advanced multimodal AI for complex document understanding',
+        priority: 3
+      });
+    }
+    
+    // OCR is always available as fallback
+    models.push({
+      provider: 'Tesseract OCR',
+      model: 'tesseract.js',
+      description: 'Optical Character Recognition fallback for image-based PDFs',
+      priority: 4
+    });
     
     return models;
   }

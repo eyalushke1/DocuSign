@@ -71,15 +71,18 @@ This is a monorepo containing both backend (Node.js/Express) and frontend (React
 
 ### AI Integration
 
-**Model Selection Strategy:**
+**Cascading Model Selection Strategy:**
 1. Primary: Claude 3.5 Sonnet (Anthropic) - optimized for document analysis
-2. Fallback: GPT-4 Turbo (OpenAI) - if Claude unavailable
+2. Secondary: GPT-4 Turbo (OpenAI) - versatile language model fallback
+3. Tertiary: Google Gemini 1.5 Pro - advanced multimodal AI fallback
+4. Final: OCR with Tesseract.js - optical character recognition for image-based PDFs
 
 **Extraction Process:**
-- Converts PDF to text using pdf-parse
-- Sends structured prompts to AI with field descriptions
-- Parses JSON responses with fallback to N/A values
-- Batch processing with rate limiting
+- Attempts text extraction using pdf-parse first
+- Tries each AI service in priority order until one succeeds
+- If all AI services fail, uses OCR to extract text from PDF images
+- OCR includes pattern matching for common field types (dates, amounts, emails)
+- Batch processing with rate limiting and comprehensive error handling
 
 ### Box.com Integration
 
@@ -91,30 +94,39 @@ This is a monorepo containing both backend (Node.js/Express) and frontend (React
 
 ## AI API Configuration
 
-**IMPORTANT**: The system requires valid AI API keys to extract data from PDFs. Without these keys, you'll get authentication errors.
+**IMPORTANT**: The system works with multiple AI providers and includes OCR fallback. For best results, configure at least one AI API key.
 
-### Required Setup:
-1. **Get an API key** from either:
-   - Anthropic (recommended): https://console.anthropic.com/
-   - OpenAI (alternative): https://platform.openai.com/api-keys
+### Supported AI Services:
+1. **Anthropic Claude** (recommended): https://console.anthropic.com/
+2. **OpenAI GPT-4**: https://platform.openai.com/api-keys  
+3. **Google Gemini**: https://makersuite.google.com/app/apikey
+4. **OCR Fallback**: Always available (no API key required)
 
-2. **Add it to your .env file**:
-   ```bash
-   ANTHROPIC_API_KEY=sk-ant-your-key-here
-   # OR
-   OPENAI_API_KEY=sk-your-key-here
-   ```
+### Setup (choose one or more):
+```bash
+# Primary (recommended)
+ANTHROPIC_API_KEY=sk-ant-your-key-here
 
-3. **Verify configuration**:
-   ```bash
-   npm run check-keys
-   ```
+# Secondary fallback
+OPENAI_API_KEY=sk-your-key-here
 
-4. **Restart the server** after adding keys
+# Tertiary fallback  
+GOOGLE_GEMINI_API_KEY=your-google-key-here
+```
+
+### Verify Configuration:
+```bash
+npm run check-keys
+```
+
+### Fallback Behavior:
+- **With AI keys**: Claude → OpenAI → Google → OCR
+- **No AI keys**: OCR-only extraction with pattern matching
+- **Partial failures**: Automatically tries next available service
 
 ### Troubleshooting:
-- If you see "401 authentication_error", your API key is invalid
-- Use `npm run check-keys` to verify your configuration
+- Authentication errors indicate invalid API keys
+- OCR fallback works even without AI API keys
 - See `API_KEY_SETUP.md` for detailed instructions
 
 ## Important Implementation Details
