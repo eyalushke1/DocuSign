@@ -1,0 +1,6 @@
+Remarks,POD,Filename,SFDC Opportunity Link Z-,Company Name,Opportunity Name,Period,Currency,Floor Amount Match,ZCompute Discount % Match,ZStorage Discount % Match,zCompute,POC,Comment,Signed Date Formatted
+DocuSign Certificate Complete,POD-2024-001,Agreement_signed.pdf,https://salesforce.com/opportunity/Z-12345,Acme Corporation,Q1 2024 Enterprise Deal,Q1 2024,USD,500000,15%,10%,200000,john.doe@acme.com,All requirements met,2024-01-15
+Certificate of Fulfillment - Approved,POD-2024-002,Contract_executed.pdf,https://company.salesforce.com/Z-67890,TechCorp Solutions,Annual Software License,2024,EUR,250000,20%,15%,150000,jane.smith@techcorp.com,Completed on schedule,2024-02-20
+Final Certificate - Requirements Met,POD-2024-003,Service_agreement.pdf,https://sales.company.com/opp/Z-54321,Global Enterprises,Multi-year Partnership,2024-2026,GBP,1000000,12%,8%,400000,bob.wilson@global.com,Milestone achieved,2024-03-10
+DocuSign Completion Certificate,POD-2024-004,Master_agreement.pdf,https://crm.company.com/Z-98765,Innovation Labs,R&D Collaboration,FY2024,USD,750000,18%,12%,300000,alice.brown@innovation.com,Phase 1 complete,2024-04-05
+Certificate of Delivery,POD-2024-005,Purchase_order.pdf,https://salesforce.example.com/Z-11111,StartupCo,Seed Funding Terms,2024,USD,100000,25%,20%,50000,mike.jones@startup.com,Initial deployment,2024-05-12
