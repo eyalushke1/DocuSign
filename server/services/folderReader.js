@@ -104,7 +104,8 @@ class FolderReader {
           userFolders.push(
             { name: '📁 OneDrive', path: path.join(homeDir, 'OneDrive'), type: 'folder', icon: '☁️', priority: 8 },
             { name: '📂 Public', path: 'C:\\Users\\Public', type: 'folder', icon: '👥', priority: 9 },
-            { name: '⚙️ AppData', path: path.join(homeDir, 'AppData'), type: 'folder', icon: '⚙️', priority: 10 }
+            { name: '⚙️ AppData', path: path.join(homeDir, 'AppData'), type: 'folder', icon: '⚙️', priority: 10 },
+            { name: '📋 CoF Documents', path: 'C:\\Zadara\\Box\\COF', type: 'folder', icon: '📋', priority: 11 }
           );
         }
         
