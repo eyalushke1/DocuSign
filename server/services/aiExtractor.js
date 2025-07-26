@@ -2,8 +2,8 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import OCRService from './ocrService.js';
+import AdvancedCoFExtractor from './advancedCoFExtractor.js';
 import dotenv from 'dotenv';
-import CoFFieldValidator from '../utils/cofFieldValidator.js';
 
 dotenv.config();
 
@@ -30,6 +30,9 @@ class AIExtractor {
     
     // Initialize OCR service as fallback
     this.ocrService = new OCRService();
+    
+    // Initialize advanced CoF extractor
+    this.advancedCofExtractor = new AdvancedCoFExtractor();
 
     this.isConfigured = !!(this.openai || this.anthropic || this.google);
     
@@ -53,6 +56,22 @@ class AIExtractor {
 
   async extractDataFromText(text, fields, fileName, documentType = 'general', pdfPath = null) {
     console.log(`🤖 Starting AI extraction for ${fileName} (${documentType})`);
+    
+    // For CoF documents, use advanced multi-OCR extractor with optimized LLM order
+    if (documentType === 'CoF') {
+      console.log(`🚀 Using Advanced CoF extractor (Gemini→GPT-4→Claude→Multi-OCR) for ${fileName}`);
+      try {
+        const advancedResult = await this.advancedCofExtractor.extractFields(text, fields, fileName, pdfPath);
+        console.log(`✅ Advanced CoF extraction completed: ${advancedResult.extractedFields}/${advancedResult.totalFields} fields`);
+        if (advancedResult.criticalFieldsFound) {
+          console.log(`🎯 Critical fields found: ${advancedResult.criticalFieldsFound}`);
+        }
+        return advancedResult;
+      } catch (error) {
+        console.error(`❌ Advanced CoF extraction error: ${error.message}`);
+        console.log(`🔄 Falling back to standard AI methods`);
+      }
+    }
     
     // If no API keys are configured, try OCR directly
     if (!this.isConfigured && pdfPath) {
@@ -117,7 +136,7 @@ ${fieldsString}
 
 General Instructions:
 1. Extract the exact values for each field from the document
-2. If a field value is not found, return "N/A"
+2. If a field value is not found, return null
 3. Return the data in valid JSON format only
 4. Be precise and accurate
 5. For dates, use YYYY-MM-DD format when possible
@@ -214,16 +233,10 @@ Return only a JSON object with the field names as keys and extracted values as v
       if (jsonMatch) {
         const extractedData = JSON.parse(jsonMatch[0]);
         
-        // Ensure all required fields are present and validate CoF-specific fields
+        // Ensure all required fields are present
         const processedData = {};
         fields.forEach(field => {
-          let value = extractedData[field.name] || 'N/A';
-          
-          // Apply CoF-specific validation if document type is CoF
-          if (documentType === 'CoF') {
-            value = CoFFieldValidator.validateField(field.name, value, result);
-          }
-          
+          let value = extractedData[field.name] || null;
           processedData[field.name] = value;
         });
         
@@ -259,7 +272,8 @@ Return only a JSON object with the field names as keys and extracted values as v
       // Use simple pattern matching for OCR results since we don't have AI
       const extractedData = {};
       fields.forEach(field => {
-        extractedData[field.name] = this.extractFieldWithPatterns(field, ocrResult.text);
+        const value = this.extractFieldWithPatterns(field, ocrResult.text);
+        extractedData[field.name] = value === 'N/A' ? null : value;
       });
 
       return {
@@ -273,10 +287,10 @@ Return only a JSON object with the field names as keys and extracted values as v
     } catch (error) {
       console.error('❌ OCR extraction failed:', error);
       
-      // Return default structure with N/A values
+      // Return default structure with null values
       const defaultData = {};
       fields.forEach(field => {
-        defaultData[field.name] = 'N/A';
+        defaultData[field.name] = null;
       });
       
       return {
@@ -356,10 +370,10 @@ Return only a JSON object with the field names as keys and extracted values as v
       errorMessage = 'API authentication failed. Please verify your API keys in the .env file and restart the server.';
     }
     
-    // Return default structure with N/A values
+    // Return default structure with null values
     const defaultData = {};
     fields.forEach(field => {
-      defaultData[field.name] = 'N/A';
+      defaultData[field.name] = null;
     });
     
     return {

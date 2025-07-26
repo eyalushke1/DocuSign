@@ -40,7 +40,7 @@ export class CoFFieldValidator {
    * Validate and enhance extracted field values
    */
   static validateField(fieldName, value, originalText) {
-    if (!value || value === 'N/A') {
+    if (!value || value === '') {
       return this.extractFieldFromText(fieldName, originalText);
     }
     
@@ -143,13 +143,13 @@ export class CoFFieldValidator {
         return this.findCertificateRemarks(text);
       case 'pod':
         const podMatch = text.match(this.patterns.pod);
-        return podMatch ? podMatch[0] : 'N/A';
+        return podMatch ? podMatch[0] : '';
       case 'sfdc_opportunity_link_z':
         const sfdcMatch = text.match(this.patterns.sfdcLink);
-        return sfdcMatch ? sfdcMatch[0] : 'N/A';
+        return sfdcMatch ? sfdcMatch[0] : '';
       case 'poc':
         const emailMatch = text.match(this.patterns.email);
-        return emailMatch ? emailMatch[0] : 'N/A';
+        return emailMatch ? emailMatch[0] : '';
       case 'comment':
         return this.findStatusComment(text);
       default:
@@ -166,7 +166,7 @@ export class CoFFieldValidator {
     
     // Look for any text with "certificate"
     const certMatch = text.match(/[^.]*certificate[^.]*/gi);
-    return certMatch ? certMatch[0].trim() : 'N/A';
+    return certMatch ? certMatch[0].trim() : '';
   }
 
   static findStatusComment(text) {
@@ -178,7 +178,7 @@ export class CoFFieldValidator {
     
     // Look for phrases ending with "completed", "met", "achieved"
     const statusMatch = text.match(/[^.]*(?:completed|met|achieved)[^.]*/gi);
-    return statusMatch ? statusMatch[0].trim() : 'N/A';
+    return statusMatch ? statusMatch[0].trim() : '';
   }
 }
 
